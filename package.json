@@ -1,0 +1,34 @@
+{
+  "name": "sslgen",
+  "version": "0.0.1",
+  "description": "Quickly generate self-signed SSL certificates for testing.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/coreybutler/sslgen.git"
+  },
+  "keywords": [
+    "ssl",
+    "gen",
+    "generate",
+    "self",
+    "signed"
+  ],
+  "author": "Corey Butler",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/coreybutler/sslgen/issues"
+  },
+  "homepage": "https://github.com/coreybutler/sslgen#readme",
+  "preferGlobal": "true",
+  "bin": {
+    "sslgen": "index.js"
+  },
+  "dependencies": {
+    "inquirer": "^1.1.2",
+    "pem": "^1.8.3"
+  }
+}
