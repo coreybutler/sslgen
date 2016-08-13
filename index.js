@@ -6,6 +6,8 @@ const http = require('http')
 const path = require('path')
 const fs = require('fs')
 const os = require('os')
+const ShortBus = require('shortbus')
+const CertificateAuthority = require('./lib/ca')
 let csr = {}
 
 http.get('http://ip-api.com/json', (res, x) => {
@@ -156,11 +158,11 @@ const wizard = () => {
     type: 'checkbox',
     choices: [
       {name: 'CA Certificate', value: 'ca', checked: false},
-      {name: 'Public Key', value: 'pubkey', checked: true},
+      {name: 'Public Key', value: 'pubkey', checked: false},
       {name: 'PKCS12 Store (.pfx)', value: 'pkcs12', checked: false},
       {name: 'Certificate Signing Request', value: 'csr', checked: false}
     ]
-  }, {
+  }/*, {
     name: 'pfxpasswd',
     type: 'password',
     message: 'PKCS12 Password:',
@@ -172,142 +174,72 @@ const wizard = () => {
 
       return false
     }
-  }]).then((answers) => {
-    let crtname = path.basename(process.cwd())
+  }*/]).then((answers) => {
+    // Configure Certificate Authority (Factory)
+    let CA = new CertificateAuthority({
+      keysize: parseInt(answers.keysize || '2048', 10),
+      encryptKey: answers.encryptkey ? answers.pkpwd : null,
+      cipher: answers.cipher || 'aes256',
+      hash: answers.hash
+    })
 
-    // Generate a private key
-    answers.keysize = parseInt(answers.keysize || '2048', 10)
+    CA.country = answers.country || csr.country
+    CA.state = answers.state || csr.region
+    CA.locality = answers.city || csr.city
+    CA.organization = answers.org || os.hostname()
+    CA.organizationUnit = answers.ou || process.env.USER
+    CA.commonName = answers.cn || CA.name
+    CA.altNames = answers.hasOwnProperty('san') ? answers.san.split(',') : ['localhost', '127.0.0.1']
 
-    let options = {}
-
-    if (answers.encryptkey) {
-      options.cipher = answers.cipher
-      options.password = answers.pkpwd
+    if (answers.email) {
+      CA.email = answers.email
     }
 
-    pem.createPrivateKey(answers.keysize, options, (err, pkdata) => {
-      fs.writeFileSync(path.join(process.cwd(), crtname + '.key'), pkdata.key)
+    // Setup Tasks
+    let tasks = new ShortBus()
 
-      // Generate a CSR
-      let csroptions = {
-        clientKey: pkdata.key,
-        keyBitsize: answers.keysize,
-        hash: answers.hash || 'sha256',
-        country: answers.country || csr.country,
-        state: answers.state || csr.region,
-        locality: answers.city || csr.city,
-        organization: answers.org || os.hostname(),
-        organizationUnit: answers.ou || process.env.USER,
-        commonName: answers.cn || crtname,
-        altNames: answers.hasOwnProperty('san') ? answers.san.split(',') : ['localhost', '127.0.0.1'],
-      }
+    // If a CA is requested, support it
+    if (answers.other.indexOf('ca') >= 0) {
+      tasks.add('Generate CA certificate.', function (done) {
+        CA.createCaCertificate(done)
+      })
+    }
 
-      if (answers.encryptkey) {
-        csroptions.clientKeyPassword = answers.pkpwd
-      }
-
-      if (answers.email) {
-        csroptions.emailAddress = answers.email
-      }
-
-      // Generate a CA Certificate if Requested
-      if (answers.other.indexOf('ca') >= 0) {
-        pem.createCertificate({
-          selfSigned: true,
-          days: 3650
-        }, (err, cert, csr, clientKey, serviceKey) => {
-          fs.writeFileSync(path.join(process.cwd(), crtname + '.ca.pem'), cert.certificate)
-          // fs.writeFileSync(path.join(process.cwd(), crtname + '.ca.key'), cert.serviceKey)
-          pem.createCertificate({
-            serviceCertificate: cert.certificate,
-            serviceKey: cert.serviceKey,
-            serial: Date.now(),
-            days: 365 * 11,
-            country: csroptions.country,
-            state: csroptions.state,
-            locality: csroptions.locality,
-            organization: csroptions.organization,
-            organizationUnit: csroptions.organizationUnit,
-            commonName: csroptions.commonName + ' CA'
-        }, (err, keys) => {
-            fs.writeFileSync(path.join(process.cwd(), crtname + '.key'), keys.clientKey)
-            fs.writeFileSync(path.join(process.cwd(), crtname + '.pem'), keys.certificate)
-
-            if (answers.other.indexOf('pubkey') >= 0) {
-              pem.getPublicKey(keys.certificate, (err, pubkey) => {
-                fs.writeFileSync(path.join(process.cwd(), crtname + '.pub'), pubkey.publicKey)
-              })
-            }
-
-            if (answers.other.indexOf('csr') >= 0) {
-              fs.writeFileSync(path.join(process.cwd(), crtname + '.csr'), keys.csr)
-            }
-
-            if (answers.other.indexOf('pkcs12') >= 0) {
-              let p12Password = csroptions.clientKeyPassword || answers.pfxpasswd || 'nopassword'
-              let opts = {}
-
-              if (answers.cipher) {
-                opts.cipher = answers.cipher
-              }
-
-              if (answers.clientKeyPassword) {
-                opts.clientKeyPassword = answers.clientKeyPassword
-              }
-
-              opts.certFiles = [path.join(process.cwd(), crtname + '.ca.pem')]
-
-              pem.createPkcs12(keys.clientKey, keys.certificate, p12Password, [options], (err, pfx) => {
-                fs.writeFileSync(path.join(process.cwd(), crtname + '.pfx'), pfx.pkcs12, 'binary')
-                console.warn('  >> PFX Password:', p12Password === 'nopassword' ? p12Password : (p12Password.replace(/\B[a-z0-9\w]/gi, '*')))
-              })
-            }
-          })
-        })
-      } else {
-        pem.createCertificate({
-          selfSigned: true,
-          serial: Date.now(),
-          days: 365 * 10,
-          country: csroptions.country,
-          state: csroptions.state,
-          locality: csroptions.locality,
-          organization: csroptions.organization,
-          organizationUnit: csroptions.organizationUnit,
-          commonName: csroptions.commonName + ' CA'
-        }, (err, keys) => {
-          fs.writeFileSync(path.join(process.cwd(), crtname + '.key'), keys.clientKey)
-          fs.writeFileSync(path.join(process.cwd(), crtname + '.pem'), keys.certificate)
-
-          if (answers.other.indexOf('csr') >= 0) {
-            fs.writeFileSync(path.join(process.cwd(), crtname + '.csr'), keys.csr)
-          }
-
-          if (answers.other.indexOf('pubkey') >= 0) {
-            pem.getPublicKey(keys.certificate, (err, pubkey) => {
-              fs.writeFileSync(path.join(process.cwd(), crtname + '.pub'), pubkey.publicKey)
-            })
-          }
-
-          if (answers.other.indexOf('pkcs12') >= 0) {
-            let p12Password = csroptions.clientKeyPassword || answers.pfxpasswd || 'nopassword'
-            let opts = {}
-
-            if (answers.cipher) {
-              opts.cipher = answers.cipher
-            }
-
-            if (answers.clientKeyPassword) {
-              opts.clientKeyPassword = answers.clientKeyPassword
-            }
-
-            pem.createPkcs12(keys.clientKey, keys.certificate, p12Password, [options], (err, pfx) => {
-              fs.writeFileSync(path.join(process.cwd(), crtname + '.pfx'), pfx.pkcs12, 'binary')
-              console.warn('  >> PFX Password:', p12Password === 'nopassword' ? p12Password : (p12Password.replace(/\B[a-z0-9\w]/gi, '*')))
-            })
-          }
-        })
-      }
+    // Generate the private key
+    tasks.add('Generating Private Key.', function (done) {
+      CA.createPrivateKey(done)
     })
+
+    // Generate a CSR
+    tasks.add('Generating Certificate Signing Request.', function (done) {
+      CA.createCSR(answers.other.indexOf('csr') < 0, done)
+    })
+
+    // // Make the primary certificate.
+    tasks.add('Generate certificate.', function (done) {
+      CA.createCertificate(true, done)
+    })
+
+    // If public key is requested, write it.
+    if (answers.other.indexOf('pubkey') >= 0) {
+      tasks.add('Generate public key.', function (done) {
+        CA.createPublicKey(CA.cert, true, done)
+      })
+    }
+
+    // // If a PKCS12 Store is requested, make it.
+    if (answers.other.indexOf('pkcs12') >= 0) {
+      tasks.add('Generate PKCS12 Store.', function (done) {
+        CA.createPKCS12Store(done)
+      })
+    }
+
+    // When everything is done, notify the user.
+    tasks.on('complete', function () {
+      console.log('  --> Files written to', process.cwd())
+    })
+
+    // Run
+    tasks.process(true)
   })
 }
