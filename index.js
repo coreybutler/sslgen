@@ -12,9 +12,9 @@ let csr = {}
 
 http.get('http://ip-api.com/json', (res, x) => {
   let data = ''
-  res.on('data', (chunk) => {
-    data += chunk.toString()
-  })
+
+  res.on('data', chunk => data += chunk.toString())
+
   res.on('end', () => {
     data = JSON.parse(data)
     csr = {
@@ -24,6 +24,7 @@ http.get('http://ip-api.com/json', (res, x) => {
     }
     wizard()
   })
+
   res.resume()
 }).on('error', (e) => {
   csr = {
@@ -162,6 +163,10 @@ const wizard = () => {
       {name: 'PKCS12 Store (.pfx)', value: 'pkcs12', checked: false},
       {name: 'Certificate Signing Request', value: 'csr', checked: false}
     ]
+  }, {
+    name: 'basename',
+    message: "Base Filename",
+    default: path.basename(process.cwd())
   }/*, {
     name: 'pfxpasswd',
     type: 'password',
@@ -195,6 +200,8 @@ const wizard = () => {
       CA.email = answers.email
     }
 
+    CA.name = answers.basename || CA.name
+
     // Setup Tasks
     let tasks = new ShortBus()
 
@@ -211,9 +218,11 @@ const wizard = () => {
     })
 
     // Generate a CSR
-    tasks.add('Generating Certificate Signing Request.', function (done) {
-      CA.createCSR(answers.other.indexOf('csr') < 0, done)
-    })
+    if (answers.other.indexOf('csr') >= 0) {
+      tasks.add('Generating Certificate Signing Request.', function (done) {
+        CA.createCSR(answers.other.indexOf('csr') < 0, done)
+      })
+    }
 
     // // Make the primary certificate.
     tasks.add('Generate certificate.', function (done) {
@@ -236,7 +245,7 @@ const wizard = () => {
 
     // When everything is done, notify the user.
     tasks.on('complete', function () {
-      console.log('  --> Files written to', process.cwd())
+      console.log('Done')
     })
 
     // Run
