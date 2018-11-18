@@ -36,7 +36,7 @@ http.get('http://ip-api.com/json', (res, x) => {
 })
 
 const wizard = () => {
-  console.log('\n=========================\nLet\'s make a certificate!\n=========================\n')
+  console.log(`\n===================================\nSelf Signed TLS Certificates v${require(require('path').join(__dirname, 'package.json')).version}\n===================================\n`)
   inquirer.prompt([{
     name: 'encryptkey',
     message: 'Do you want to encrypt the private key?',
